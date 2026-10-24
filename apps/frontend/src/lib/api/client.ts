@@ -87,9 +87,18 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     }
 
-    const url = endpoint.startsWith('http')
-      ? endpoint
-      : `${this.baseUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`
+    let url: string
+    if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+      url = endpoint
+    } else {
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+      const cleanBase = this.baseUrl.replace(/\/+$/, '')
+      if (cleanBase && !cleanEndpoint.startsWith(cleanBase)) {
+        url = `${cleanBase}${cleanEndpoint}`
+      } else {
+        url = cleanEndpoint
+      }
+    }
 
     const response = await fetch(url, {
       ...options,
