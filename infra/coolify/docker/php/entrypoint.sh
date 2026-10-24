@@ -1,19 +1,19 @@
 #!/bin/sh
 ###############################################################################
-# DukanOS — Backend PHP-FPM Entrypoint (Coolify Deployment)
+# ThinkCode — Backend PHP-FPM Entrypoint
 #
 # Execution Lifecycle:
-#   1. Wait for database (PostgreSQL) if using TCP host
-#   2. Auto-generate APP_KEY if empty and enabled
-#   3. Execute database migrations (php artisan migrate --force)
-#   4. Optionally seed demo / initial store catalog data
-#   5. Create storage symlink (php artisan storage:link)
-#   6. Warm configuration and route caches
-#   7. Pass execution to CMD (php-fpm, queue worker, or scheduler)
+#   1. Wait for PostgreSQL if TCP host is configured
+#   2. Validate APP_KEY (fail-fast in production; generate in local dev if permitted)
+#   3. Execute database migrations if explicitly enabled (RUN_MIGRATIONS=true)
+#   4. Optionally seed database if explicitly enabled (RUN_SEED=true)
+#   5. Create storage symlink (php artisan storage:link) for HTTP service
+#   6. Warm configuration and route caches if enabled (RUN_CACHE=true)
+#   7. Pass execution to process CMD (php-fpm, queue worker, or scheduler)
 ###############################################################################
 set -e
 
-echo "==> DukanOS backend entrypoint initialized"
+echo "==> ThinkCode backend entrypoint initialized (Process: $@)"
 
 # ── 1. Wait for Database (PostgreSQL) ────────────────────────────────────────
 wait_for_database() {
@@ -31,45 +31,54 @@ wait_for_database() {
     echo "==> Database is reachable"
 }
 
-# Only wait if using a TCP database host (skip for sqlite/local)
 if [ "${DB_CONNECTION}" != "sqlite" ] && [ -n "${DB_HOST}" ]; then
     wait_for_database
 fi
 
 cd /var/www/backend
 
-# ── 2. Auto-generate APP_KEY ────────────────────────────────────────────────
+# Ensure no stale bootstrap caches exist from host or prior builds
+rm -f bootstrap/cache/*.php
+
+# ── 2. Validate APP_KEY (Fail-fast in production) ───────────────────────────
 if [ -z "${APP_KEY}" ]; then
-    if [ "${GENERATE_APP_KEY:-true}" = "true" ]; then
-        echo "==> APP_KEY not provided — generating new application key"
+    if [ "${APP_ENV}" = "production" ]; then
+        echo "CRITICAL: APP_KEY is unset in production environment. Aborting startup to prevent session invalidation and data loss." >&2
+        exit 1
+    elif [ "${GENERATE_APP_KEY:-true}" = "true" ]; then
+        echo "==> NOTICE: APP_KEY not provided in development — auto-generating key"
         touch /var/www/backend/.env
         php artisan key:generate --force
+    else
+        echo "ERROR: APP_KEY is missing and GENERATE_APP_KEY is false. Aborting startup." >&2
+        exit 1
     fi
 fi
 
 # ── 3. Database Migrations ──────────────────────────────────────────────────
-if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+# Default to false in production to prevent concurrent multi-container migration race conditions.
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
     echo "==> Executing database migrations"
     php artisan migrate --force
 fi
 
 # ── 4. Database Seeding ─────────────────────────────────────────────────────
 if [ "${RUN_SEED:-false}" = "true" ]; then
-    echo "==> Seeding database (PunjabElectricStoreSeeder & catalog)"
+    echo "==> Seeding database"
     php artisan db:seed --force
 fi
 
-# ── 5. Storage Symlink ──────────────────────────────────────────────────────
-echo "==> Ensuring public storage link"
-php artisan storage:link --force || true
+# ── 5. Storage Symlink & Caching (Primary HTTP process only) ────────────────
+if [ "$1" = "php-fpm" ]; then
+    echo "==> Ensuring public storage link"
+    php artisan storage:link --force 2>/dev/null || true
 
-# ── 6. Cache Warm-Up ────────────────────────────────────────────────────────
-if [ "${RUN_CACHE:-true}" = "true" ]; then
-    echo "==> Warming Laravel production caches"
-    php artisan config:cache || true
-    php artisan route:cache || true
-    php artisan view:cache || true
-    php artisan event:cache || true
+    if [ "${RUN_CACHE:-false}" = "true" ]; then
+        echo "==> Warming Laravel production caches"
+        php artisan config:cache || true
+        php artisan route:cache || true
+        php artisan view:cache || true
+    fi
 fi
 
 echo "==> Handing off to process: $@"

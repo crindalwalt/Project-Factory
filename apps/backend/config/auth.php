@@ -114,4 +114,17 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Public Self-Registration Toggle
+    |--------------------------------------------------------------------------
+    |
+    | When disabled, the public user registration endpoint returns HTTP 403.
+    | Useful for enterprise or internal applications where account creation
+    | must be controlled via invitation or administrator provisioning.
+    |
+    */
+
+    'registration_enabled' => env('ALLOW_REGISTRATION', true),
+
 ];

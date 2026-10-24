@@ -1,37 +1,36 @@
 ###############################################################################
-# DukanOS — Coolify Production Docker Compose Stack
+# ThinkCode Full-Stack Template — Docker Compose Stack
 #
 # Services:
-#   - nginx:     Nginx Gateway + React SPA static files + Traefik reverse proxy
+#   - nginx:     Nginx Gateway + React SPA static files + FastCGI reverse proxy
 #   - backend:   Laravel 13 API on PHP 8.4-FPM
 #   - queue:     Laravel queue worker (redis)
 #   - scheduler: Laravel periodic task scheduler
 #   - postgres:  PostgreSQL 17 database
-#   - redis:     Redis 7 cache, session, and queue broker
+#   - redis:     Redis 7 cache, session, and queue broker (AOF persistence enabled)
 #
-# Coolify Deployment Rules:
-#   - No hardcoded port mappings (all traffic routed via Coolify Traefik)
-#   - Only nginx has traefik.enable=true (Coolify auto-generates routers/services)
-#   - Volumes use local driver managed by Docker / Coolify
+# Deployment Compatibility:
+#   - Coolify Traefik reverse proxy ready
+#   - Local development override via docker-compose.dev.yml
 ###############################################################################
 
 services:
   # ── Nginx Gateway & React SPA ─────────────────────────────────────────────
   nginx:
     build:
-      context: .
-      dockerfile: coolify/docker/nginx/Dockerfile
+      context: ..
+      dockerfile: infra/coolify/docker/nginx/Dockerfile
       args:
         VITE_API_URL: "/api/v1"
-        VITE_APP_NAME: "${APP_NAME:-DukanOS}"
+        VITE_APP_NAME: "${APP_NAME:-ThinkCode}"
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
     volumes:
-      - dukanos_storage:/var/www/backend/storage/app/public:ro
+      - thinkcode_storage:/var/www/backend/storage/app/public:ro
     networks:
-      - dukanos_network
+      - thinkcode_network
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
       interval: 10s
@@ -44,27 +43,27 @@ services:
   # ── Laravel 13 API Backend (PHP 8.4-FPM) ──────────────────────────────────
   backend:
     build:
-      context: .
-      dockerfile: coolify/docker/php/Dockerfile
+      context: ..
+      dockerfile: infra/coolify/docker/php/Dockerfile
     restart: unless-stopped
     labels:
       - "traefik.enable=false"
     environment:
-      APP_NAME: "${APP_NAME:-DukanOS}"
+      APP_NAME: "${APP_NAME:-ThinkCode}"
       APP_ENV: "${APP_ENV:-production}"
       APP_KEY: "${APP_KEY:-}"
       APP_DEBUG: "${APP_DEBUG:-false}"
-      APP_URL: "${APP_URL:-https://pos.shahzadhermes.com}"
-      FRONTEND_URL: "${FRONTEND_URL:-https://pos.shahzadhermes.com}"
-      SANCTUM_STATEFUL_DOMAINS: "${SANCTUM_STATEFUL_DOMAINS:-pos.shahzadhermes.com}"
+      APP_URL: "${APP_URL:-http://localhost:8080}"
+      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:8080}"
+      SANCTUM_STATEFUL_DOMAINS: "${SANCTUM_STATEFUL_DOMAINS:-localhost:8080,localhost:5173,localhost:3000,127.0.0.1:8080,127.0.0.1:5173}"
 
       # Database
       DB_CONNECTION: "${DB_CONNECTION:-pgsql}"
       DB_HOST: "${DB_HOST:-postgres}"
       DB_PORT: "${DB_PORT:-5432}"
-      DB_DATABASE: "${DB_DATABASE:-dukanos}"
-      DB_USERNAME: "${DB_USERNAME:-dukanos_user}"
-      DB_PASSWORD: "${DB_PASSWORD:-dukanos_db_secret}"
+      DB_DATABASE: "${DB_DATABASE:-thinkcode}"
+      DB_USERNAME: "${DB_USERNAME:-thinkcode_user}"
+      DB_PASSWORD: "${DB_PASSWORD:-thinkcode_db_secret}"
 
       # Cache / Session / Queue
       CACHE_STORE: "${CACHE_STORE:-redis}"
@@ -75,35 +74,35 @@ services:
       # Redis
       REDIS_HOST: "${REDIS_HOST:-redis}"
       REDIS_PORT: "${REDIS_PORT:-6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD:-dukanos_redis_secret}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-thinkcode_redis_secret}"
       REDIS_CLIENT: "${REDIS_CLIENT:-phpredis}"
 
       # Logging & Storage
       LOG_CHANNEL: "${LOG_CHANNEL:-stack}"
-      LOG_LEVEL: "${LOG_LEVEL:-error}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
       FILESYSTEM_DISK: "${FILESYSTEM_DISK:-local}"
 
       # Mail
-      MAIL_MAILER: "${MAIL_MAILER:-smtp}"
-      MAIL_HOST: "${MAIL_HOST:-smtp.hostinger.com}"
-      MAIL_PORT: "${MAIL_PORT:-465}"
+      MAIL_MAILER: "${MAIL_MAILER:-log}"
+      MAIL_HOST: "${MAIL_HOST:-127.0.0.1}"
+      MAIL_PORT: "${MAIL_PORT:-2525}"
       MAIL_USERNAME: "${MAIL_USERNAME:-}"
       MAIL_PASSWORD: "${MAIL_PASSWORD:-}"
-      MAIL_SCHEME: "${MAIL_SCHEME:-}"
-      MAIL_ENCRYPTION: "${MAIL_ENCRYPTION:-ssl}"
-      MAIL_FROM_ADDRESS: "${MAIL_FROM_ADDRESS:-noreply@dukanos.pk}"
-      MAIL_FROM_NAME: "${MAIL_FROM_NAME:-DukanOS}"
+      MAIL_ENCRYPTION: "${MAIL_ENCRYPTION:-null}"
+      MAIL_FROM_ADDRESS: "${MAIL_FROM_ADDRESS:-noreply@thinkcode.dev}"
+      MAIL_FROM_NAME: "${MAIL_FROM_NAME:-ThinkCode}"
 
-      # Entrypoint Flags
-      RUN_MIGRATIONS: "${RUN_MIGRATIONS:-true}"
+      # Entrypoint Flags (Production defaults: fail-safe and deterministic)
+      RUN_MIGRATIONS: "${RUN_MIGRATIONS:-false}"
       RUN_SEED: "${RUN_SEED:-false}"
       RUN_CACHE: "${RUN_CACHE:-true}"
-      GENERATE_APP_KEY: "${GENERATE_APP_KEY:-true}"
-      TRUSTED_PROXIES: "${TRUSTED_PROXIES:-*}"
+      GENERATE_APP_KEY: "${GENERATE_APP_KEY:-false}"
+      TRUSTED_PROXIES: "${TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}"
+      ALLOW_REGISTRATION: "${ALLOW_REGISTRATION:-true}"
     volumes:
-      - dukanos_storage:/var/www/backend/storage/app/public
+      - thinkcode_storage:/var/www/backend/storage/app/public
     networks:
-      - dukanos_network
+      - thinkcode_network
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,36 +118,36 @@ services:
   # ── Laravel Queue Worker ───────────────────────────────────────────────────
   queue:
     build:
-      context: .
-      dockerfile: coolify/docker/php/Dockerfile
+      context: ..
+      dockerfile: infra/coolify/docker/php/Dockerfile
     command: ["php", "artisan", "queue:work", "redis", "--tries=3", "--timeout=90", "--sleep=3"]
     restart: unless-stopped
     labels:
       - "traefik.enable=false"
     environment:
-      APP_NAME: "${APP_NAME:-DukanOS}"
+      APP_NAME: "${APP_NAME:-ThinkCode}"
       APP_ENV: "${APP_ENV:-production}"
       APP_KEY: "${APP_KEY:-}"
       APP_DEBUG: "${APP_DEBUG:-false}"
       DB_CONNECTION: "${DB_CONNECTION:-pgsql}"
       DB_HOST: "${DB_HOST:-postgres}"
       DB_PORT: "${DB_PORT:-5432}"
-      DB_DATABASE: "${DB_DATABASE:-dukanos}"
-      DB_USERNAME: "${DB_USERNAME:-dukanos_user}"
-      DB_PASSWORD: "${DB_PASSWORD:-dukanos_db_secret}"
+      DB_DATABASE: "${DB_DATABASE:-thinkcode}"
+      DB_USERNAME: "${DB_USERNAME:-thinkcode_user}"
+      DB_PASSWORD: "${DB_PASSWORD:-thinkcode_db_secret}"
       CACHE_STORE: "${CACHE_STORE:-redis}"
       QUEUE_CONNECTION: "${QUEUE_CONNECTION:-redis}"
       REDIS_HOST: "${REDIS_HOST:-redis}"
       REDIS_PORT: "${REDIS_PORT:-6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD:-dukanos_redis_secret}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-thinkcode_redis_secret}"
       RUN_MIGRATIONS: "false"
       RUN_SEED: "false"
       RUN_CACHE: "false"
       GENERATE_APP_KEY: "false"
     volumes:
-      - dukanos_storage:/var/www/backend/storage/app/public
+      - thinkcode_storage:/var/www/backend/storage/app/public
     networks:
-      - dukanos_network
+      - thinkcode_network
     depends_on:
       backend:
         condition: service_healthy
@@ -164,36 +163,36 @@ services:
   # ── Laravel Task Scheduler ────────────────────────────────────────────────
   scheduler:
     build:
-      context: .
-      dockerfile: coolify/docker/php/Dockerfile
+      context: ..
+      dockerfile: infra/coolify/docker/php/Dockerfile
     command: ["php", "artisan", "schedule:work"]
     restart: unless-stopped
     labels:
       - "traefik.enable=false"
     environment:
-      APP_NAME: "${APP_NAME:-DukanOS}"
+      APP_NAME: "${APP_NAME:-ThinkCode}"
       APP_ENV: "${APP_ENV:-production}"
       APP_KEY: "${APP_KEY:-}"
       APP_DEBUG: "${APP_DEBUG:-false}"
       DB_CONNECTION: "${DB_CONNECTION:-pgsql}"
       DB_HOST: "${DB_HOST:-postgres}"
       DB_PORT: "${DB_PORT:-5432}"
-      DB_DATABASE: "${DB_DATABASE:-dukanos}"
-      DB_USERNAME: "${DB_USERNAME:-dukanos_user}"
-      DB_PASSWORD: "${DB_PASSWORD:-dukanos_db_secret}"
+      DB_DATABASE: "${DB_DATABASE:-thinkcode}"
+      DB_USERNAME: "${DB_USERNAME:-thinkcode_user}"
+      DB_PASSWORD: "${DB_PASSWORD:-thinkcode_db_secret}"
       CACHE_STORE: "${CACHE_STORE:-redis}"
       QUEUE_CONNECTION: "${QUEUE_CONNECTION:-redis}"
       REDIS_HOST: "${REDIS_HOST:-redis}"
       REDIS_PORT: "${REDIS_PORT:-6379}"
-      REDIS_PASSWORD: "${REDIS_PASSWORD:-dukanos_redis_secret}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-thinkcode_redis_secret}"
       RUN_MIGRATIONS: "false"
       RUN_SEED: "false"
       RUN_CACHE: "false"
       GENERATE_APP_KEY: "false"
     volumes:
-      - dukanos_storage:/var/www/backend/storage/app/public
+      - thinkcode_storage:/var/www/backend/storage/app/public
     networks:
-      - dukanos_network
+      - thinkcode_network
     depends_on:
       backend:
         condition: service_healthy
@@ -213,15 +212,15 @@ services:
     labels:
       - "traefik.enable=false"
     environment:
-      POSTGRES_DB: "${DB_DATABASE:-dukanos}"
-      POSTGRES_USER: "${DB_USERNAME:-dukanos_user}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD:-dukanos_db_secret}"
+      POSTGRES_DB: "${DB_DATABASE:-thinkcode}"
+      POSTGRES_USER: "${DB_USERNAME:-thinkcode_user}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-thinkcode_db_secret}"
     volumes:
-      - dukanos_db_data:/var/lib/postgresql/data
+      - thinkcode_db_data:/var/lib/postgresql/data
     networks:
-      - dukanos_network
+      - thinkcode_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-dukanos_user} -d ${DB_DATABASE:-dukanos}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-thinkcode_user} -d ${DB_DATABASE:-thinkcode}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -233,13 +232,13 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=false"
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-dukanos_redis_secret}"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-thinkcode_redis_secret}"]
     volumes:
-      - dukanos_redis_data:/data
+      - thinkcode_redis_data:/data
     networks:
-      - dukanos_network
+      - thinkcode_network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-dukanos_redis_secret}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-thinkcode_redis_secret}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -247,14 +246,14 @@ services:
 
 # ── Volumes ─────────────────────────────────────────────────────────────────
 volumes:
-  dukanos_db_data:
+  thinkcode_db_data:
     driver: local
-  dukanos_redis_data:
+  thinkcode_redis_data:
     driver: local
-  dukanos_storage:
+  thinkcode_storage:
     driver: local
 
 # ── Networks ────────────────────────────────────────────────────────────────
 networks:
-  dukanos_network:
+  thinkcode_network:
     driver: bridge
